@@ -24,26 +24,24 @@ class TransactionPinningTest(BitcoinTestFramework):
         utxo_alice = wallet.get_utxo()
 
         self.log.info("1. Alice broadcasts her original transaction (Tx A)")
-        tx_a = wallet.create_self_transfer(utxo_to_spend=utxo_alice, fee_rate=10)
+        tx_a = wallet.create_self_transfer(utxo_to_spend=utxo_alice, fee_rate=Decimal("0.00010"))
         txid_a = node.sendrawtransaction(tx_a['hex'])
         
         # We need the UTXO created by Tx A so the attacker can spend it
-        utxo_attacker = wallet.get_utxo(txid=txid_a)
+        utxo_attacker = tx_a["new_utxo"]
 
         self.log.info("2. Attacker broadcasts a massive child transaction (Tx A_Child)")
-        # By setting target_weight very high, we create a bloated transaction
-        # that pays a minimal fee rate, dragging down the package.
         tx_a_child = wallet.create_self_transfer(
             utxo_to_spend=utxo_attacker, 
-            fee_rate=1, 
-            target_weight=400000 
+            fee_rate=Decimal("0.00001"), 
+            target_vsize=100000 
         )
         node.sendrawtransaction(tx_a_child['hex'])
 
         self.log.info("3. Alice attempts to RBF Tx A with a higher fee rate (Tx B)")
         tx_b = wallet.create_self_transfer(
             utxo_to_spend=utxo_alice, 
-            fee_rate=50 
+            fee_rate=Decimal("0.00050") 
         )
 
         # Alice's Tx B has a 5x higher fee RATE (50 vs 10). 
