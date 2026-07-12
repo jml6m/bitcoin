@@ -95,12 +95,34 @@ EXTENDED_SCRIPTS = [
 # Special script to run each bench sanity check
 TOOL_BENCH_SANITY_CHECK = "tool_bench_sanity_check.py"
 
+# The few tests that run for minutes. The runner uses list scheduling (an
+# idle worker pulls the next test, see _schedule_order()), so the order of
+# the other tests does not affect total run time -- only starting a long
+# test late does. Front-loading these covers that. Ordered longest first;
+# check_slow_scripts() verifies each is a real base test.
+SLOW_SCRIPTS = [
+    # ~5 min
+    'feature_fee_estimation.py',
+    'feature_taproot.py',
+    'feature_block.py',
+    'mempool_ephemeral_dust.py',
+    'wallet_conflicts.py',
+    'p2p_opportunistic_1p1c.py',
+    'p2p_node_network_limited.py',
+    # ~2 min
+    'mining_getblocktemplate_longpoll.py',
+    'p2p_segwit.py',
+    'feature_maxuploadtarget.py',
+    'feature_assumeutxo.py',
+    'mempool_updatefromblock.py',
+    'mempool_persist.py',
+]
+
 BASE_SCRIPTS = [
     # Special scripts that are "expanded" later
     TOOL_BENCH_SANITY_CHECK,
-    # Scripts that are run by default.
-    # Longest test should go first, to favor running tests in parallel
-    # vv Tests less than 5m vv
+    # Scripts that are run by default. Order does not affect scheduling
+    # (see _schedule_order()); long tests are started first via SLOW_SCRIPTS.
     'feature_fee_estimation.py',
     'feature_taproot.py',
     'feature_block.py',
@@ -109,14 +131,12 @@ BASE_SCRIPTS = [
     'p2p_opportunistic_1p1c.py',
     'p2p_node_network_limited.py --v1transport',
     'p2p_node_network_limited.py --v2transport',
-    # vv Tests less than 2m vv
     'mining_getblocktemplate_longpoll.py',
     'p2p_segwit.py',
     'feature_maxuploadtarget.py',
     'feature_assumeutxo.py',
     'mempool_updatefromblock.py',
     'mempool_persist.py',
-    # vv Tests less than 60s vv
     'rpc_psbt.py',
     'wallet_fundrawtransaction.py',
     'wallet_bumpfee.py',
@@ -150,7 +170,6 @@ BASE_SCRIPTS = [
     'feature_config_args.py',
     'wallet_listtransactions.py',
     'wallet_miniscript.py',
-    # vv Tests less than 30s vv
     'wallet_deprecated_rbf.py',
     'p2p_invalid_messages.py',
     'rpc_createmultisig.py',
@@ -393,8 +412,6 @@ BASE_SCRIPTS = [
     'wallet_migration.py',
     'p2p_ibd_txrelay.py',
     'p2p_seednode.py',
-    # Don't append tests at the end to avoid merge conflicts
-    # Put them in a random line within the section that fits their approximate run-time
 ]
 
 # Place EXTENDED_SCRIPTS first since it has the 3 longest running tests
@@ -406,6 +423,24 @@ NON_SCRIPTS = [
     "create_cache.py",
     "test_runner.py",
 ]
+
+
+def _schedule_order(scripts):
+    """Order scripts so the few long-running tests start first.
+
+    The runner uses list scheduling: whenever a worker goes idle it pulls the
+    next test off the front of the queue. Graham's classic result is that this
+    is within a factor of (2 - 1/jobs) of the optimal makespan for *any* order,
+    so ordering is never needed for correctness. The bound is only approached
+    when a long test happens to start near the tail while other workers sit
+    idle -- front-loading SLOW_SCRIPTS defends against exactly that case; the
+    order of the remaining tests is left untouched.
+    """
+    slow_rank = {name: i for i, name in enumerate(SLOW_SCRIPTS)}
+    slow = sorted((s for s in scripts if s.split()[0] in slow_rank),
+                  key=lambda s: slow_rank[s.split()[0]])
+    rest = [s for s in scripts if s.split()[0] not in slow_rank]
+    return slow + rest
 
 def main():
     # Parse arguments and pass through unrecognised args
@@ -502,11 +537,12 @@ def main():
             else:
                 print("{}WARNING!{} Test '{}' not found in full test list.".format(BOLD[1], BOLD[0], test))
     elif args.extended:
-        # Include extended tests
-        test_list += ALL_SCRIPTS
+        # Include extended tests. EXTENDED_SCRIPTS holds the 3 longest tests
+        # overall, so keep them first, then the slow-first base ordering.
+        test_list += EXTENDED_SCRIPTS + _schedule_order(BASE_SCRIPTS)
     else:
         # Run base tests only
-        test_list += BASE_SCRIPTS
+        test_list += _schedule_order(BASE_SCRIPTS)
 
     # Remove the test cases that the user has explicitly asked to exclude.
     # The user can specify a test case with or without the .py extension.
@@ -570,6 +606,7 @@ def main():
 
     check_script_list(src_dir=config["environment"]["SRCDIR"], fail_on_warn=fail_on_warn)
     check_script_prefixes()
+    check_slow_scripts()
 
     run_tests(
         test_list=test_list,
@@ -870,6 +907,15 @@ def check_script_prefixes():
         print("%sERROR:%s %d tests not meeting naming conventions:" % (BOLD[1], BOLD[0], len(bad_script_names)))
         print("  %s" % ("\n  ".join(sorted(bad_script_names))))
         raise AssertionError("Some tests are not following naming convention!")
+
+
+def check_slow_scripts():
+    """Check that every SLOW_SCRIPTS entry references a real base test."""
+    base_names = {script.split()[0] for script in BASE_SCRIPTS}
+    unknown = [s for s in SLOW_SCRIPTS if s.split()[0] not in base_names]
+    if unknown:
+        print("%sERROR:%s SLOW_SCRIPTS entries not present in BASE_SCRIPTS: %s" % (BOLD[1], BOLD[0], ", ".join(unknown)))
+        raise AssertionError("Every SLOW_SCRIPTS entry must reference a script in BASE_SCRIPTS!")
 
 
 def check_script_list(*, src_dir, fail_on_warn):
