@@ -57,6 +57,10 @@ don't have test cases for.
 - Use an underscore to separate words
     - exception: for tests for specific RPCs or command line options which don't include underscores, name the test after the exact RPC or argument name, eg `rpc_decodescript.py`, not `rpc_decode_script.py`
 - Don't use the redundant word `test` in the name, eg `interface_zmq.py`, not `interface_zmq_test.py`
+- Add new tests to `BASE_SCRIPTS` in [test_runner.py](test_runner.py). The order
+  is not significant.
+- If your test usually takes at least 120 seconds, also add its name to
+  `SLOW_SCRIPTS` so the scheduler starts it early.
 
 #### General test-writing advice
 
