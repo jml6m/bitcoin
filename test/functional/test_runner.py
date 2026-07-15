@@ -145,6 +145,8 @@ def get_base_scripts(functional_dir):
         and TEST_NAME_PREFIX.match(name)
         and name not in EXTENDED_SCRIPTS
     )
+    unused_params = set(TEST_PARAMS) - set(discovered)
+    assert not unused_params, f"Unused TEST_PARAMS entries: {sorted(unused_params)}"
     scripts = []
     for name in discovered:
         for params in TEST_PARAMS.get(name, ['']):
